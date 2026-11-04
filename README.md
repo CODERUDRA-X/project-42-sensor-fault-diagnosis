@@ -147,7 +147,8 @@ The notebook generates the dataset, writes it to SQLite, and reloads it for anal
 
 - Database: `machinery_telemetry.db`
 - Table: `machinery_vibration_telemetry`
-- Synthetic data is regenerated deterministically from the notebook; the database file is not required in Git.
+- Synthetic data is regenerated deterministically from the notebook (seed `42`); the database file is not required in Git.
+- A CSV export of the same dataset is provided in `data/machinery_vibration_telemetry.csv` (6,000 rows, same six fields).
 
 ---
 
@@ -167,20 +168,19 @@ The notebook generates the dataset, writes it to SQLite, and reloads it for anal
 
 For class `c` and feature `j`, the model estimates:
 
-\[
+$$
 \hat{\mu}_{cj}=\frac{1}{N_c}\sum_{i:y_i=c}x_{ij}
-\]
+$$
 
-\[
-\hat{\sigma}^{2}_{cj}
-=\frac{1}{N_c}\sum_{i:y_i=c}(x_{ij}-\hat{\mu}_{cj})^2+\epsilon
-\]
+$$
+\hat{\sigma}^{2}_{cj} =\frac{1}{N_c}\sum_{i:y_i=c}(x_{ij}-\hat{\mu}_{cj})^2+\epsilon
+$$
 
 The Naive Bayes assumption is:
 
-\[
+$$
 P(\mathbf{x}\mid y=c)=\prod_{j=1}^{d}P(x_j\mid y=c)
-\]
+$$
 
 The log-domain implementation avoids multiplying many small density values directly. The notebook compares learned parameters, predictions, and posterior probabilities against Scikit-learn.
 
@@ -229,7 +229,7 @@ In this run, Isotonic Regression gives the lowest Brier score and ECE. Calibrati
 
 ### 5. Stratified 5-fold cross-validation
 
-A `StandardScaler → GaussianNB` pipeline is evaluated using 5-fold stratified cross-validation (`shuffle=True`, `random_state=42`). Scaling is not theoretically required by ideal GNB, but the pipeline keeps preprocessing inside each fold and makes later model substitution easier.
+A `StandardScaler → GaussianNB` pipeline is evaluated using 5-fold stratified cross-validation (`shuffle=True`, `random_state=42`). Gaussian NB is scale-invariant (standardisation does not change its posterior probabilities), but keeping the scaler inside the pipeline prevents leakage across folds and makes later model substitution easier.
 
 | Metric | Mean | Standard deviation |
 |---|---:|---:|
@@ -240,6 +240,194 @@ A `StandardScaler → GaussianNB` pipeline is evaluated using 5-fold stratified 
 | Critical precision | 0.7827 | 0.0311 |
 
 The notebook also verifies that, for this run, StandardScaler and raw GaussianNB produce identical predictions on the holdout set (`100%` agreement).
+
+### 6. Bayesian minimum-risk classification
+
+The default classifier chooses the most probable class:
+
+$$
+\hat y_{\text{argmax}}=\arg\max_k P(y=k\mid\mathbf{x})
+$$
+
+The cost-sensitive decision rule instead chooses the action with the lowest expected cost:
+
+$$
+R(k\mid\mathbf{x})=\sum_j C_{jk}P(y=j\mid\mathbf{x})
+$$
+
+$$
+\hat y_{\text{risk}}=\arg\min_k R(k\mid\mathbf{x})
+$$
+
+The notebook's **illustrative** cost matrix uses rows as actual classes and columns as predicted actions:
+
+| Actual \ Predicted | Normal | Warning | Critical |
+|---|---:|---:|---:|
+| Normal | 0 | 1 | 2 |
+| Warning | 10 | 0 | 3 |
+| Critical | 100 | 30 | 0 |
+
+The matrix represents an assumed operational preference: missing a Critical fault is more expensive than raising an unnecessary alarm. These values are experiment inputs and must be replaced with plant-approved cost estimates before any real deployment.
+
+**Out-of-fold results across all 6,000 records:**
+
+| Metric | Standard argmax | Minimum-risk decision |
+|---|---:|---:|
+| Accuracy | 0.8640 | 0.7952 |
+| Critical recall | 0.8256 | 0.9067 |
+| Critical precision | 0.7810 | 0.6774 |
+| Total illustrative cost | 6,827 | 4,895 |
+| Average cost / machine | 1.1378 | 0.8158 |
+| Critical faults predicted Normal | 1 | 0 |
+
+The cost-sensitive policy reduces the observed illustrative cost by **28.3%** and increases Critical recall, while lowering accuracy and Critical precision. This is a deliberate trade-off, not a free performance gain.
+
+---
+
+## Interpretability
+
+The notebook includes:
+
+- Class-conditional KDE curves alongside fitted Gaussian densities.
+- A per-observation log-likelihood contribution breakdown.
+- A Critical-versus-Normal log-likelihood-ratio waterfall.
+- Mean per-sensor evidence across truly Critical test observations.
+
+For two classes `A` and `B`, the posterior log-odds decompose into a prior term plus sensor-specific evidence:
+
+$$
+\log\frac{P(A\mid\mathbf{x})}{P(B\mid\mathbf{x})} = \log\frac{P(A)}{P(B)} + \sum_j \log\frac{P(x_j\mid A)}{P(x_j\mid B)}
+$$
+
+These contributions explain the model's statistical evidence. They are not causal explanations of physical failure.
+
+## Run locally
+
+### Requirements
+
+- Python `3.10+`
+- JupyterLab / Jupyter Notebook
+- Packages listed in [`requirements.txt`](requirements.txt)
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/CODERUDRA-X/project-42-sensor-fault-diagnosis.git
+cd project-42-sensor-fault-diagnosis
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+jupyter lab
+```
+
+Open:
+
+```text
+notebooks/Project42_Sensor_Fault_Diagnosis_GNB.ipynb
+```
+
+Select the `.venv` Python kernel and run all cells from top to bottom.
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/CODERUDRA-X/project-42-sensor-fault-diagnosis.git
+cd project-42-sensor-fault-diagnosis
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+jupyter lab
+```
+
+The notebook regenerates the synthetic data and creates local SQLite / model artifacts (`machinery_telemetry.db`, `sensor_fault_gnb_pipeline.joblib`) in its working directory; these generated files are not tracked by Git.
+
+## Repository structure
+
+```text
+project-42-sensor-fault-diagnosis/
+│
+├── README.md
+├── requirements.txt
+├── .gitignore
+│
+├── notebooks/
+│   └── Project42_Sensor_Fault_Diagnosis_GNB.ipynb
+│
+├── data/
+│   └── machinery_vibration_telemetry.csv
+│
+└── assets/
+    ├── sensor-data-overview.png
+    ├── conditional-correlation-heatmaps.png
+    ├── probability-calibration.png
+    ├── cross-validation-confusion-matrices.png
+    ├── cost-sensitive-confusion-matrices.png
+    └── critical-threshold-tradeoff.png
+```
+
+## Saved model demonstration
+
+The final notebook section saves a fitted preprocessing/model pipeline as:
+
+```text
+sensor_fault_gnb_pipeline.joblib
+```
+
+It also defines `diagnose_machine(...)` to return class probabilities, the standard argmax decision, and the minimum-risk action for one supplied sensor reading.
+
+**Implementation note:** the saved artifact in the current notebook is a `StandardScaler + GaussianNB` pipeline. The Platt / Isotonic calibration experiments are evaluated separately; they are not included in that saved artifact.
+
+## Limitations & responsible use
+
+- **Synthetic data only:** no real plant telemetry or maintenance history is included.
+- **Simplified physics:** the generator is designed for controlled experiments, not to reproduce every machine's dynamics.
+- **Conditional dependence:** the sensor features are correlated within classes, violating GNB's simplifying assumption.
+- **Static observations:** the current model does not explicitly model temporal sequences, degradation trajectories, or concept drift.
+- **Illustrative costs:** the cost matrix is hypothetical and is not a verified financial loss model.
+- **Calibration is distribution-dependent:** calibration quality can change when equipment, operating conditions, or class frequencies change.
+- **Not safety-certified:** the model must not be used to trigger real shutdowns or safety actions without domain validation, independent testing, and appropriate engineering controls.
+
+## Future work
+
+1. Validate against real, labelled industrial condition-monitoring datasets.
+2. Test sensor drift, missing readings, noise bursts, and distribution shift.
+3. Add temporal models for sequential telemetry.
+4. Compare against covariance-aware and tree-based baselines.
+5. Estimate the decision cost matrix with maintenance engineers and real operational data.
+6. Package the trained and calibrated model plus decision policy as a tested inference API.
+
+## Reproducibility
+
+- Random seed: `42`
+- Synthetic record count: `6,000`
+- Notebook: `notebooks/Project42_Sensor_Fault_Diagnosis_GNB.ipynb`
+- Primary implementation: custom NumPy GNB
+- Benchmark: Scikit-learn GaussianNB and QDA
+
+The numerical results in this README correspond to the executed notebook committed with this repository. Re-run the notebook after changing dependencies, generator parameters, split settings, or cost assumptions.
+
+## Acknowledgements
+
+Built as an academic machine-learning research project exploring probabilistic classification, calibration, interpretability, and cost-sensitive decision theory.
+
+---
+
+<div align="center">
+
+**Project 42 · Synthetic Sensor Fault Diagnosis · Gaussian Naive Bayes**
+
+*Measure the signal. Calibrate the probability. Minimize the operational risk.*
+
+</div>
+ler and raw GaussianNB produce identical predictions on the holdout set (`100%` agreement).
 
 ### 6. Bayesian minimum-risk classification
 
