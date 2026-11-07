@@ -201,10 +201,13 @@ with tab_live:
         st.success("All four readings fall within the observed ranges of the synthetic dataset. This does not mean they are safe operating values.")
 
     st.markdown("#### Model probability output")
+    # Keep the same Normal → Warning → Critical order in both the chart and table.
     probability_df = pd.DataFrame(
-        {"Class": list(result["probabilities"].keys()), "Raw probability (%)": [v * 100 for v in result["probabilities"].values()]}
-    ).set_index("Class")
-    st.bar_chart(probability_df, y="Raw probability (%)", height=220)
+        {"Raw probability (%)": [result["probabilities"][class_name] * 100 for class_name in CLASSES]},
+        index=pd.Index(CLASSES, name="Class"),
+    )
+    # Horizontal bars keep class labels readable and make the class order explicit.
+    st.bar_chart(probability_df, y="Raw probability (%)", horizontal=True, height=220)
     st.dataframe(
         probability_df.style.format({"Raw probability (%)": "{:.6f}%"}),
         use_container_width=True,
