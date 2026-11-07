@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -201,15 +202,43 @@ with tab_live:
         st.success("All four readings fall within the observed ranges of the synthetic dataset. This does not mean they are safe operating values.")
 
     st.markdown("#### Model probability output")
-    # Keep the same Normal → Warning → Critical order in both the chart and table.
+    # Keep one authoritative class order in both the chart and the table.
+    # Streamlit's built-in bar chart may reorder categorical labels; Altair's
+    # explicit sort prevents that and keeps Normal → Warning → Critical.
     probability_df = pd.DataFrame(
-        {"Raw probability (%)": [result["probabilities"][class_name] * 100 for class_name in CLASSES]},
-        index=pd.Index(CLASSES, name="Class"),
+        {
+            "Class": list(CLASSES),
+            "Raw probability (%)": [
+                result["probabilities"][class_name] * 100 for class_name in CLASSES
+            ],
+        }
     )
-    # Horizontal bars keep class labels readable and make the class order explicit.
-    st.bar_chart(probability_df, y="Raw probability (%)", horizontal=True, height=220)
+    probability_chart = (
+        alt.Chart(probability_df)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "Raw probability (%):Q",
+                title="Raw probability (%)",
+                scale=alt.Scale(domain=[0, 100]),
+            ),
+            y=alt.Y(
+                "Class:N",
+                title=None,
+                sort=list(CLASSES),
+                axis=alt.Axis(labelLimit=140),
+            ),
+            tooltip=[
+                alt.Tooltip("Class:N", title="Class"),
+                alt.Tooltip("Raw probability (%):Q", title="Raw probability", format=".6f"),
+            ],
+        )
+        .properties(height=190)
+    )
+    st.altair_chart(probability_chart, use_container_width=True)
+    probability_table = probability_df.set_index("Class")
     st.dataframe(
-        probability_df.style.format({"Raw probability (%)": "{:.6f}%"}),
+        probability_table.style.format({"Raw probability (%)": "{:.6f}%"}),
         use_container_width=True,
     )
     st.caption("These are raw GaussianNB outputs from an uncalibrated pipeline. They are not calibrated real-world confidence scores.")
