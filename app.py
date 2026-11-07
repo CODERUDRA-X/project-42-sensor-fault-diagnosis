@@ -135,6 +135,10 @@ if sample_choice != "Manual input" and not sample_df.empty:
             for feature in FEATURES:
                 st.session_state[f"input_{feature}"] = float(row[feature])
             st.session_state.loaded_sample_id = str(row.get("machine_id", "Dataset example"))
+            st.session_state.loaded_sample_label = str(row["operational_state"])
+            st.session_state.loaded_sample_values = {
+                feature: float(row[feature]) for feature in FEATURES
+            }
 
 labels = {
     "vibration_amplitude_g": ("Vibration amplitude", "g", "How strongly the machine vibrates."),
@@ -167,6 +171,9 @@ if st.sidebar.button("Reset sensor readings", use_container_width=True):
     }
     for feature in FEATURES:
         st.session_state.pop(f"input_{feature}", None)
+    # A manual reset is no longer the previously loaded labelled dataset row.
+    for key in ("loaded_sample_id", "loaded_sample_label", "loaded_sample_values"):
+        st.session_state.pop(key, None)
     st.rerun()
 
 # Use values from the actual widgets, not preset labels, for every prediction.
@@ -194,6 +201,52 @@ with tab_live:
         st.metric("Standard decision", result["standard_decision"])
     with col_risk:
         st.metric("Cost-sensitive decision", result["cost_sensitive_decision"])
+
+    # Show ground-truth comparison only while the current readings still match
+    # the exact labelled row loaded from the synthetic dataset.
+    loaded_values = st.session_state.get("loaded_sample_values")
+    is_loaded_row_unchanged = (
+        isinstance(loaded_values, dict)
+        and all(
+            abs(float(values[feature]) - float(loaded_values[feature])) <= 1e-9
+            for feature in FEATURES
+        )
+    )
+
+    if is_loaded_row_unchanged:
+        actual_label = st.session_state.get("loaded_sample_label")
+        sample_id = st.session_state.get("loaded_sample_id", "Dataset example")
+        standard_match = result["standard_decision"] == actual_label
+        risk_match = result["cost_sensitive_decision"] == actual_label
+
+        st.markdown("#### Ground-truth comparison")
+        st.caption(
+            f"Comparing this prediction with the known dataset label for **{sample_id}**. "
+            "This is a labelled synthetic example, not a real machine diagnosis."
+        )
+        gt1, gt2, gt3 = st.columns(3)
+        gt1.metric("Actual dataset label", actual_label)
+        gt2.metric(
+            "Standard decision",
+            result["standard_decision"],
+            delta="Matches label" if standard_match else "Does not match label",
+            delta_color="normal" if standard_match else "inverse",
+        )
+        gt3.metric(
+            "Cost-sensitive decision",
+            result["cost_sensitive_decision"],
+            delta="Matches label" if risk_match else "Does not match label",
+            delta_color="normal" if risk_match else "inverse",
+        )
+        st.caption(
+            "A match means the decision equals this row's synthetic target label. "
+            "One example cannot establish overall model accuracy or reliability."
+        )
+    elif st.session_state.get("loaded_sample_values") is not None:
+        st.info(
+            "The sensor readings have changed from the loaded dataset example. "
+            "Ground-truth comparison is hidden because the edited readings have no known label."
+        )
 
     if result["range_warnings"]:
         for warning in result["range_warnings"]:
